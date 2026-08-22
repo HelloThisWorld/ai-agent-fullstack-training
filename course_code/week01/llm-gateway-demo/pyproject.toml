@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-gateway-demo"
+version = "0.1.0"
+description = "Local-first LLM gateway with provider adapters and external secret storage"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "httpx>=0.27",
+  "keyring>=25",
+  "pydantic>=2.7",
+  "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
+]
+clients = [
+  "textual>=0.70",
+]
+
+[project.scripts]
+llm-gateway = "gateway.main:run"
+llm-gateway-secrets = "gateway.secret_cli:main"
+llm-gateway-tui = "tui.app:main"
+
+[tool.setuptools.packages.find]
+include = ["gateway*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
