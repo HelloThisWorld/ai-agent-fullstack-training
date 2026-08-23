@@ -5,13 +5,18 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
+from gateway.errors import GatewayError
 from gateway.schemas import StreamEvent, UnifiedResponse
 
 
 def _usage(value: Any) -> dict[str, int]:
     if value is None:
         return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    return value.model_dump()
+    return {
+        "prompt_tokens": value.prompt_tokens,
+        "completion_tokens": value.completion_tokens,
+        "total_tokens": value.total_tokens,
+    }
 
 
 def _tool_calls(response: UnifiedResponse) -> list[dict[str, Any]]:
@@ -82,12 +87,22 @@ async def chat_sse(
     stream: AsyncIterator[StreamEvent], response_id: str, model: str
 ) -> AsyncIterator[str]:
     first = True
-    async for event in stream:
-        if event.type not in {"text.delta", "reasoning.delta", "tool_call.delta", "usage", "completed"}:
-            continue
-        payload = chat_chunk(response_id, model, event, first)
-        first = False
-        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    try:
+        async for event in stream:
+            if event.type not in {
+                "text.delta",
+                "reasoning.delta",
+                "tool_call.delta",
+                "usage",
+                "completed",
+            }:
+                continue
+            payload = chat_chunk(response_id, model, event, first)
+            first = False
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    except GatewayError as exc:
+        error = {"code": exc.code, "message": exc.message, "details": exc.details}
+        yield f"event: error\ndata: {json.dumps({'error': error}, ensure_ascii=False)}\n\n"
     yield "data: [DONE]\n\n"
 
 
@@ -129,25 +144,29 @@ async def responses_sse(
         "response": {"id": response_id, "object": "response", "model": model},
     }
     yield f"event: response.created\ndata: {json.dumps(started, ensure_ascii=False)}\n\n"
-    async for event in stream:
-        if event.type == "text.delta":
-            payload = {
-                "type": "response.output_text.delta",
-                "response_id": response_id,
-                "delta": event.text or "",
-            }
-            yield f"event: response.output_text.delta\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-        elif event.type == "reasoning.delta":
-            payload = {
-                "type": "response.reasoning.delta",
-                "response_id": response_id,
-                "delta": event.reasoning or "",
-            }
-            yield f"event: response.reasoning.delta\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-        elif event.type == "completed":
-            payload = {
-                "type": "response.completed",
-                "response": {"id": response_id, "object": "response", "model": model},
-                "finish_reason": event.finish_reason or "stop",
-            }
-            yield f"event: response.completed\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    try:
+        async for event in stream:
+            if event.type == "text.delta":
+                payload = {
+                    "type": "response.output_text.delta",
+                    "response_id": response_id,
+                    "delta": event.text or "",
+                }
+                yield f"event: response.output_text.delta\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            elif event.type == "reasoning.delta":
+                payload = {
+                    "type": "response.reasoning.delta",
+                    "response_id": response_id,
+                    "delta": event.reasoning or "",
+                }
+                yield f"event: response.reasoning.delta\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            elif event.type == "completed":
+                payload = {
+                    "type": "response.completed",
+                    "response": {"id": response_id, "object": "response", "model": model},
+                    "finish_reason": event.finish_reason or "stop",
+                }
+                yield f"event: response.completed\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    except GatewayError as exc:
+        error = {"code": exc.code, "message": exc.message, "details": exc.details}
+        yield f"event: error\ndata: {json.dumps({'error': error}, ensure_ascii=False)}\n\n"

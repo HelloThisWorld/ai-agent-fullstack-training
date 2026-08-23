@@ -4,12 +4,20 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from gateway.api.formatters import chat_response, chat_sse, responses_response, responses_sse
-from gateway.errors import GatewayError
-from gateway.schemas import ChatCompletionRequest, Message, ResponsesRequest, UnifiedRequest
+from gateway.errors import GatewayError, TemplateError
+from gateway.schemas import (
+    ChatCompletionRequest,
+    Message,
+    ResponsesRequest,
+    TemplateRenderRequest,
+    TemplateUpsertRequest,
+    UnifiedRequest,
+)
+from gateway.templates import validate_template_name
 
 router = APIRouter()
 
@@ -32,6 +40,8 @@ def _chat_unified(payload: ChatCompletionRequest) -> UnifiedRequest:
         tool_choice=payload.tool_choice,
         response_format=payload.response_format,
         chat_template_kwargs=payload.chat_template_kwargs,
+        template=payload.template,
+        variables=payload.variables,
         metadata={"endpoint": "/v1/chat/completions"},
     )
 
@@ -57,6 +67,9 @@ def _responses_unified(payload: ResponsesRequest) -> UnifiedRequest:
         max_tokens=payload.max_output_tokens,
         tools=tools,
         response_format=response_format,
+        chat_template_kwargs=payload.chat_template_kwargs,
+        template=payload.template,
+        variables=payload.variables,
         metadata=payload.metadata or {"endpoint": "/v1/responses"},
     )
 
@@ -97,6 +110,67 @@ async def providers(request: Request) -> dict[str, Any]:
     return {"data": result}
 
 
+@router.get("/v1/usage")
+async def usage(
+    request: Request,
+    model: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    return await _runtime(request).store.usage(model=model, limit=limit)
+
+
+@router.get("/v1/templates")
+async def templates(request: Request) -> dict[str, Any]:
+    return {"data": await _runtime(request).store.list_templates()}
+
+
+@router.post("/v1/templates")
+async def create_template(payload: TemplateUpsertRequest, request: Request) -> dict[str, Any]:
+    validate_template_name(payload.name)
+    return await _runtime(request).store.upsert_template(
+        payload.name, payload.content, payload.description
+    )
+
+
+@router.get("/v1/templates/{name}")
+async def get_template(name: str, request: Request) -> dict[str, Any]:
+    validate_template_name(name)
+    template = await _runtime(request).store.get_template(name)
+    if template is None:
+        raise TemplateError("template_not_found", f"Template '{name}' was not found.", 404)
+    return template
+
+
+@router.put("/v1/templates/{name}")
+async def update_template(
+    name: str, payload: TemplateUpsertRequest, request: Request
+) -> dict[str, Any]:
+    validate_template_name(name)
+    if payload.name != name:
+        raise TemplateError("template_name_mismatch", "Path name and payload name must match.", 400)
+    return await _runtime(request).store.upsert_template(
+        name, payload.content, payload.description
+    )
+
+
+@router.post("/v1/templates/{name}/render")
+async def render_template(
+    name: str, payload: TemplateRenderRequest, request: Request
+) -> dict[str, Any]:
+    validate_template_name(name)
+    rendered = await _runtime(request).service.templates.render(name, payload.variables)
+    return {"name": name, "rendered": rendered}
+
+
+@router.delete("/v1/templates/{name}")
+async def delete_template(name: str, request: Request) -> dict[str, Any]:
+    validate_template_name(name)
+    deleted = await _runtime(request).store.delete_template(name)
+    if not deleted:
+        raise TemplateError("template_not_found", f"Template '{name}' was not found.", 404)
+    return {"deleted": True, "name": name}
+
+
 @router.post("/v1/chat/completions")
 async def chat_completions(payload: ChatCompletionRequest, request: Request):
     runtime = _runtime(request)
@@ -128,7 +202,14 @@ async def responses(payload: ResponsesRequest, request: Request):
 
 
 async def gateway_error_handler(_: Request, exc: GatewayError) -> JSONResponse:
+    payload: dict[str, Any] = {"code": exc.code, "message": exc.message}
+    if exc.details:
+        payload["details"] = exc.details
+    headers = {}
+    if "retry_after_seconds" in exc.details:
+        headers["Retry-After"] = str(exc.details["retry_after_seconds"])
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": {"code": exc.code, "message": exc.message}},
+        content={"error": payload},
+        headers=headers,
     )

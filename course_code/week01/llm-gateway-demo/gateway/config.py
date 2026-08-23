@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from gateway.storage import default_data_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +29,12 @@ class Settings:
     llama_gpu_layers: int | None = None
     llama_threads: int | None = None
     llama_batch_size: int = 256
+    data_path: str = field(default_factory=default_data_path)
+    rate_limit_requests: int = 30
+    rate_limit_window_seconds: float = 60.0
+    max_retries: int = 3
+    retry_base_delay_seconds: float = 0.25
+    retry_max_delay_seconds: float = 4.0
     openai_base_url: str = "https://api.openai.com/v1"
     anthropic_base_url: str = "https://api.anthropic.com"
     deepseek_base_url: str = "https://api.deepseek.com"
@@ -72,6 +80,29 @@ class Settings:
             ),
             llama_batch_size=int(
                 os.getenv("LLAMA_CPP_BATCH_SIZE", str(defaults.llama_batch_size))
+            ),
+            data_path=os.getenv("LLM_GATEWAY_DATA_PATH", default_data_path()),
+            rate_limit_requests=int(
+                os.getenv("LLM_GATEWAY_RATE_LIMIT_REQUESTS", str(defaults.rate_limit_requests))
+            ),
+            rate_limit_window_seconds=float(
+                os.getenv(
+                    "LLM_GATEWAY_RATE_LIMIT_WINDOW_SECONDS",
+                    str(defaults.rate_limit_window_seconds),
+                )
+            ),
+            max_retries=int(os.getenv("LLM_GATEWAY_MAX_RETRIES", str(defaults.max_retries))),
+            retry_base_delay_seconds=float(
+                os.getenv(
+                    "LLM_GATEWAY_RETRY_BASE_DELAY_SECONDS",
+                    str(defaults.retry_base_delay_seconds),
+                )
+            ),
+            retry_max_delay_seconds=float(
+                os.getenv(
+                    "LLM_GATEWAY_RETRY_MAX_DELAY_SECONDS",
+                    str(defaults.retry_max_delay_seconds),
+                )
             ),
             openai_base_url=os.getenv("LLM_GATEWAY_OPENAI_BASE_URL", defaults.openai_base_url),
             anthropic_base_url=os.getenv(

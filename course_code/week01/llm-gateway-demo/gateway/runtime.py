@@ -11,12 +11,16 @@ from gateway.registry import AdapterRegistry
 from gateway.secrets.windows_credential import WindowsCredentialStore
 from gateway.service import CompletionService
 from gateway.process_manager import LlamaProcessManager
+from gateway.policies import ModelRateLimiter, RetryPolicy
+from gateway.storage import GatewayStore
+from gateway.templates import PromptTemplateEngine
 
 
 class GatewayRuntime:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.process_manager = LlamaProcessManager(settings)
+        self.store = GatewayStore(settings.data_path)
         self.client = httpx.AsyncClient(
             timeout=httpx.Timeout(settings.request_timeout_seconds, connect=10.0)
         )
@@ -58,9 +62,20 @@ class GatewayRuntime:
             ),
             "DeepSeek Chat Completions adapter; credential is external.",
         )
-        self.service = CompletionService(self.registry)
+        self.service = CompletionService(
+            self.registry,
+            self.store,
+            PromptTemplateEngine(self.store),
+            ModelRateLimiter(settings.rate_limit_requests, settings.rate_limit_window_seconds),
+            RetryPolicy(
+                max_retries=settings.max_retries,
+                base_delay_seconds=settings.retry_base_delay_seconds,
+                max_delay_seconds=settings.retry_max_delay_seconds,
+            ),
+        )
 
     async def start(self) -> None:
+        await self.store.initialize()
         await self.process_manager.start()
 
     async def close(self) -> None:

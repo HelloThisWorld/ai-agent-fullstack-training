@@ -43,6 +43,8 @@ class ChatCompletionRequest(BaseModel):
     tool_choice: Any | None = None
     response_format: dict[str, Any] | None = None
     chat_template_kwargs: dict[str, Any] | None = None
+    template: str | None = None
+    variables: dict[str, Any] = Field(default_factory=dict)
     user: str | None = None
 
 
@@ -58,7 +60,20 @@ class ResponsesRequest(BaseModel):
     max_output_tokens: int | None = Field(default=None, gt=0)
     tools: list[dict[str, Any]] | None = None
     text: dict[str, Any] | None = None
+    chat_template_kwargs: dict[str, Any] | None = None
+    template: str | None = None
+    variables: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] | None = None
+
+
+class TemplateUpsertRequest(BaseModel):
+    name: str
+    content: str = Field(min_length=1, max_length=100_000)
+    description: str = Field(default="", max_length=2_000)
+
+
+class TemplateRenderRequest(BaseModel):
+    variables: dict[str, Any] = Field(default_factory=dict)
 
 
 class UnifiedRequest(BaseModel):
@@ -76,6 +91,9 @@ class UnifiedRequest(BaseModel):
     tool_choice: Any | None = None
     response_format: dict[str, Any] | None = None
     chat_template_kwargs: dict[str, Any] | None = None
+    template: str | None = None
+    variables: dict[str, Any] = Field(default_factory=dict)
+    request_id: str = Field(default_factory=lambda: f"req_{uuid.uuid4().hex}")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -83,6 +101,20 @@ class Usage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    reasoning_tokens: int = 0
+    cached_prompt_tokens: int = 0
+    cache_creation_tokens: int = 0
+
+    @property
+    def category_totals(self) -> dict[str, int]:
+        return {
+            "prompt": self.prompt_tokens,
+            "completion": self.completion_tokens,
+            "reasoning": self.reasoning_tokens,
+            "cached_prompt": self.cached_prompt_tokens,
+            "cache_creation": self.cache_creation_tokens,
+            "total": self.total_tokens,
+        }
 
 
 class ToolCall(BaseModel):
@@ -110,12 +142,35 @@ class StreamEvent(BaseModel):
         "tool_call.delta",
         "usage",
         "completed",
+        "error",
     ]
     text: str | None = None
     reasoning: str | None = None
     tool_call: dict[str, Any] | list[dict[str, Any]] | None = None
     usage: Usage | None = None
     finish_reason: str | None = None
+    error: dict[str, Any] | None = None
+
+
+class UsageRecord(BaseModel):
+    request_id: str
+    model: str
+    provider: str
+    endpoint: str
+    stream: bool
+    status: str
+    status_code: int
+    error_code: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    reasoning_tokens: int = 0
+    cached_prompt_tokens: int = 0
+    cache_creation_tokens: int = 0
+    total_tokens: int = 0
+    latency_ms: float = 0.0
+    ttft_ms: float | None = None
+    retries: int = 0
+    created_at: float = Field(default_factory=time.time)
 
 
 class ProviderCapabilities(BaseModel):

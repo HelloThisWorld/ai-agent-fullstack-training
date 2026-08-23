@@ -25,12 +25,30 @@ def content_to_text(content: str | list[dict[str, Any]] | None) -> str:
 
 def parse_usage(payload: dict[str, Any] | None) -> Usage:
     payload = payload or {}
+    prompt_details = payload.get("prompt_tokens_details") or {}
+    completion_details = payload.get("completion_tokens_details") or {}
+    prompt_tokens = int(payload.get("prompt_tokens", payload.get("input_tokens", 0)) or 0)
+    completion_tokens = int(
+        payload.get("completion_tokens", payload.get("output_tokens", 0)) or 0
+    )
     return Usage(
-        prompt_tokens=int(payload.get("prompt_tokens", payload.get("input_tokens", 0)) or 0),
-        completion_tokens=int(
-            payload.get("completion_tokens", payload.get("output_tokens", 0)) or 0
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=int(payload.get("total_tokens", prompt_tokens + completion_tokens) or 0),
+        reasoning_tokens=int(
+            payload.get("reasoning_tokens", completion_details.get("reasoning_tokens", 0)) or 0
         ),
-        total_tokens=int(payload.get("total_tokens", 0) or 0),
+        cached_prompt_tokens=int(
+            payload.get(
+                "cached_prompt_tokens",
+                prompt_details.get("cached_tokens", payload.get("cache_read_input_tokens", 0)),
+            )
+            or 0
+        ),
+        cache_creation_tokens=int(
+            payload.get("cache_creation_input_tokens", prompt_details.get("cache_creation_tokens", 0))
+            or 0
+        ),
     )
 
 
